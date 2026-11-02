@@ -1,0 +1,23 @@
+# Local full stack:  cp accident-cloud/.env.example accident-cloud/.env  (set JWT_SECRET) then  docker compose up --build
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: accident_db
+      POSTGRES_USER: accident_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U accident_user -d accident_db"]
+      interval: 5s
+      retries: 10
+  api:
+    build: ./accident-cloud
+    env_file: ./accident-cloud/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://accident_user:${POSTGRES_PASSWORD}@db:5432/accident_db
+    depends_on:
+      db: {condition: service_healthy}
+    ports: ["8000:8000"]
+volumes:
+  pgdata:

@@ -1,0 +1,17 @@
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Secrets and credentials (never commit device keys / APN / phone numbers)
+src/secrets.h
+src/ca.pem
+
+# Compiled binary files
+*.bin
+*.elf
+*.hex
+
+# IDE specific files
+.vscode/
+.clangd/
