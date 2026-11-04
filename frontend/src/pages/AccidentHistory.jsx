@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { MapPin } from 'lucide-react'
 import AccidentTable from '../components/AccidentTable'
+import LocationMap from '../components/LocationMap'
 import Loading, { ErrorBox } from '../components/Loading'
 import { accidentService } from '../services/accidentService'
 import { useFetch } from '../hooks/useFetch'
@@ -23,9 +25,36 @@ export default function AccidentHistory({ embedded = false }) {
   const set = (k) => (e) => setFilters({ ...filters, [k]: e.target.value })
   const pages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1
 
+  const latestWithGps = data?.items?.find((a) => a.gps_valid && a.latitude != null)
+
   return (
-    <div>
-      {!embedded && <h1 className="mb-4 text-2xl font-bold">Accident history</h1>}
+    <div className="space-y-6">
+      {!embedded && <h1 className="text-2xl font-bold">Vehicle Accidents &amp; Location History</h1>}
+
+      {!embedded && latestWithGps && (
+        <div className="card border-l-4 border-l-blue-600 bg-white shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <MapPin className="text-red-500" size={18} />
+              <h2 className="font-semibold text-slate-800">
+                Incident Location Map: <span className="font-mono text-blue-600">{latestWithGps.accident_id}</span> ({latestWithGps.vehicle_number})
+              </h2>
+            </div>
+            {latestWithGps.google_maps_url && (
+              <a
+                href={latestWithGps.google_maps_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+              >
+                Open in Google Maps &rarr;
+              </a>
+            )}
+          </div>
+          <LocationMap accident={latestWithGps} height={250} />
+        </div>
+      )}
+
       <div className="card">
         <form className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6" onSubmit={(e) => { e.preventDefault(); setPage(1); setApplied(filters) }}>
           <input className="input" placeholder="Vehicle number" value={filters.vehicle_number} onChange={set('vehicle_number')} aria-label="Vehicle number" />

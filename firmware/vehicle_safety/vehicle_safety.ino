@@ -48,7 +48,7 @@ const unsigned long CANCEL_WINDOW_MS = 10000;
 const char MODEM_APN[]   = "airtelgprs.com";
 
 // Cloudflare Tunnel URL (update this each time you restart cloudflared)
-const char CLOUD_HOST[]  = "brave-original-completed-pennsylvania.trycloudflare.com";
+const char CLOUD_HOST[]  = "potato-arising-payments-projects.trycloudflare.com";
 const char CLOUD_PATH[]  = "/api/v1/device/accidents";
 
 // Device credentials from your admin dashboard
@@ -268,19 +268,32 @@ bool sendToCloud(float lat, float lon, float gForce) {
   String authHeader = "Authorization: Device " + String(DEVICE_ID) + ":" + String(DEVICE_KEY);
   modemCommand("AT+HTTPPARA=\"USERDATA\",\"" + authHeader + "\"", 1000);
 
+  // -- Step 6B: Configure SSL for Cloudflare (TLS 1.2 + SNI + No Cert Check) --
+  modemCommand("AT+CSSLCFG=\"sslversion\",0,4", 1000);
+  modemCommand("AT+CSSLCFG=\"authmode\",0,0", 1000);
+  modemCommand("AT+CSSLCFG=\"enableSNI\",0,1", 1000);
+  modemCommand("AT+HTTPPARA=\"SSLCFG\",0", 1000);
+
   // -- Step 7: Send body length, wait for DOWNLOAD prompt --
+  while (Modem_Serial.available()) Modem_Serial.read();
+  Serial.print("MODEM >> AT+HTTPDATA=");
+  Serial.println(bodyLen);
   Modem_Serial.print("AT+HTTPDATA=");
   Modem_Serial.print(bodyLen);
   Modem_Serial.print(",10000\r\n");
-  delay(300);
 
-  String prompt;
+  String prompt = "";
   unsigned long started = millis();
   while (millis() - started < 5000) {
-    while (Modem_Serial.available()) prompt += (char)Modem_Serial.read();
+    while (Modem_Serial.available()) {
+      char c = (char)Modem_Serial.read();
+      prompt += c;
+    }
     if (prompt.indexOf("DOWNLOAD") >= 0) break;
     delay(10);
   }
+  Serial.print("MODEM << ");
+  Serial.println(prompt);
 
   if (prompt.indexOf("DOWNLOAD") < 0) {
     Serial.println("No DOWNLOAD prompt from modem: " + prompt);
@@ -289,12 +302,26 @@ bool sendToCloud(float lat, float lon, float gForce) {
   }
 
   // -- Step 8: Send JSON body --
+  Serial.println("MODEM >> Sending JSON body...");
   Modem_Serial.print(jsonBody);
   delay(1500); // give modem time to absorb data
 
   // -- Step 9: Execute HTTP POST (action=1) --
-  r = modemCommand("AT+HTTPACTION=1", 10000);
-  Serial.println("HTTPACTION response: " + r);
+  Serial.println("MODEM >> AT+HTTPACTION=1");
+  while (Modem_Serial.available()) Modem_Serial.read();
+  Modem_Serial.print("AT+HTTPACTION=1\r\n");
+
+  r = "";
+  started = millis();
+  while (millis() - started < 30000) { // wait up to 30s for cellular TLS + HTTP response
+    while (Modem_Serial.available()) {
+      r += (char)Modem_Serial.read();
+    }
+    if (r.indexOf("+HTTPACTION:") >= 0) break;
+    delay(10);
+  }
+  Serial.print("MODEM << ");
+  Serial.println(r);
 
   // Response contains: +HTTPACTION: 1,<status_code>,<data_len>
   bool success = false;

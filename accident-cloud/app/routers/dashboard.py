@@ -80,6 +80,8 @@ def insurance(user: User = Depends(require_roles("INSURANCE")), db: Session = De
 @router.get("/admin")
 def admin(user: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
     devices = db.scalars(select(Device).order_by(Device.id)).all()
+    latest = db.scalar(select(Accident).order_by(Accident.accident_date.desc()))
+    recent_accidents = db.scalars(select(Accident).order_by(Accident.accident_date.desc()).limit(5)).all()
     return {
         "total_users": _count(db, select(User)), "total_vehicles": _count(db, select(Vehicle)),
         "total_devices": len(devices), "total_accidents": _count(db, select(Accident)),
@@ -87,5 +89,7 @@ def admin(user: User = Depends(require_roles("ADMIN")), db: Session = Depends(ge
         "pending_notifications": _count(db, select(Notification).where(Notification.delivery_status.in_(("PENDING", "FAILED", "UNKNOWN")))),
         "devices": [device_service.serialize(d) for d in devices],
         "online_devices": sum(1 for d in devices if device_service.is_online(d)),
+        "latest_accident": acs.serialize(latest, user) if latest else None,
+        "recent_accidents": [acs.serialize(a, user) for a in recent_accidents],
         "accidents_by_month": _by_month(db, user),
     }

@@ -1,7 +1,11 @@
+
 import { useState } from 'react'
-import { AlertTriangle, Bell, Car, Cpu, FileText, Users } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { AlertTriangle, Bell, Car, Cpu, FileText, Users, MapPin, ExternalLink } from 'lucide-react'
 import StatCard from '../components/StatCard'
 import StatusBadge from '../components/StatusBadge'
+import LocationMap from '../components/LocationMap'
+import AccidentTable from '../components/AccidentTable'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Loading, { Empty, ErrorBox } from '../components/Loading'
 import { adminService } from '../services/adminService'
@@ -87,19 +91,118 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState('devices')
   if (loading) return <Loading />
   if (error) return <ErrorBox message={error} onRetry={refresh} />
-  const tabs = [['devices', 'Devices'], ['users', 'Users & insurers'], ['audit', 'Audit log']]
+  const tabs = [
+    ['devices', 'Devices'],
+    ['accidents', `Accidents (${data.total_accidents})`],
+    ['users', 'Users & insurers'],
+    ['audit', 'Audit log']
+  ]
+  const la = data.latest_accident
+  const mapUrl = la?.google_maps_url || (la?.latitude && la?.longitude ? `https://www.google.com/maps?q=${la.latitude},${la.longitude}` : null)
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">System administration</h1>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard icon={Users} label="Users" value={data.total_users} /><StatCard icon={Car} label="Vehicles" value={data.total_vehicles} />
+        <StatCard icon={Users} label="Users" value={data.total_users} />
+        <StatCard icon={Car} label="Vehicles" value={data.total_vehicles} />
         <StatCard icon={Cpu} tone="green" label="Devices (online / total)" value={`${data.online_devices} / ${data.total_devices}`} />
-        <StatCard icon={AlertTriangle} tone="red" label="Accidents" value={data.total_accidents} /><StatCard icon={FileText} tone="amber" label="Claims" value={data.total_claims} />
+        <StatCard icon={AlertTriangle} tone="red" label="Accidents" value={data.total_accidents} />
+        <StatCard icon={FileText} tone="amber" label="Claims" value={data.total_claims} />
         <StatCard icon={Bell} tone="amber" label="Pending / failed notifications" value={data.pending_notifications} />
       </div>
+
+      {/* Latest Accident & Live Location Section */}
+      {la && (
+        <div className="card border-l-4 border-l-red-500 bg-white shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500"></span>
+              </span>
+              <h2 className="text-lg font-bold text-slate-800">Latest Accident Alert &amp; Location</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link to={`/accidents/${la.accident_id}`} className="font-mono text-sm font-semibold text-blue-600 hover:underline">
+                {la.accident_id}
+              </Link>
+              <StatusBadge status={la.accident_status} />
+              {la.claim_status && <StatusBadge status={la.claim_status} />}
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-3 text-sm">
+              <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-4">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Vehicle Number:</span>
+                  <span className="font-semibold text-slate-900">{la.vehicle_number}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Owner Name:</span>
+                  <span className="font-medium text-slate-800">{la.owner_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Date &amp; Time:</span>
+                  <span className="font-medium text-slate-800">{new Date(la.accident_date).toLocaleString()}</span>
+                </div>
+                {la.acceleration_g != null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Impact Force:</span>
+                    <span className="font-bold text-red-600">{Number(la.acceleration_g).toFixed(2)} G</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between border-t border-slate-200 pt-2">
+                  <span className="text-slate-500">GPS Coordinates:</span>
+                  {la.gps_valid && la.latitude != null ? (
+                    <span className="font-mono text-xs font-semibold text-slate-800">
+                      {la.latitude.toFixed(6)}, {la.longitude.toFixed(6)}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">GPS unavailable</span>
+                  )}
+                </div>
+              </div>
+
+              {mapUrl && (
+                <a
+                  href={mapUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+                >
+                  <MapPin size={16} /> Open in Google Maps (as in SMS)
+                </a>
+              )}
+              <div className="text-right">
+                <Link to={`/accidents/${la.accident_id}`} className="text-xs font-medium text-blue-600 hover:underline">
+                  View full accident &amp; claim details &rarr;
+                </Link>
+              </div>
+            </div>
+
+            <div>
+              <LocationMap accident={la} height={240} />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="mb-4 flex gap-2 border-b border-slate-200">{tabs.map(([k, l]) => (<button key={k} onClick={() => setTab(k)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === k ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>{l}</button>))}</div>
         {tab === 'devices' && <Devices dashboardDevices={data.devices} onChanged={reload} />}
+        {tab === 'accidents' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-800">Recent Reported Accidents</h3>
+              <Link to="/accidents" className="text-xs font-medium text-blue-600 hover:underline">
+                View all in Accidents section &rarr;
+              </Link>
+            </div>
+            <AccidentTable items={data.recent_accidents || []} showOwner showClaim />
+          </div>
+        )}
         {tab === 'users' && <Users_ />}
         {tab === 'audit' && <Audit />}
       </div>
