@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -18,6 +18,27 @@ TRANSITIONS = {
 }
 
 
+def check_and_expire_claims(db: Session):
+    """Auto-reject any claim pending (SUBMITTED/IN_PROGRESS) for over 7 days (1 week)."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=7)
+    expired = db.scalars(
+        select(InsuranceClaim).where(
+            InsuranceClaim.claim_status.in_(("SUBMITTED", "IN_PROGRESS")),
+            InsuranceClaim.submitted_at < cutoff
+        )
+    ).all()
+    for c in expired:
+        prev = {"claim_status": c.claim_status}
+        c.claim_status = "REJECTED"
+        c.reviewed_at = now
+        c.rejection_reason = "Auto-rejected: Claim review window of 7 days (1 week) expired without settlement."
+        audit.log(db, None, "CLAIM_AUTO_REJECTED", "claim", c.claim_id, prev,
+                  {"claim_status": "REJECTED", "rejection_reason": c.rejection_reason})
+    if expired:
+        db.commit()
+
+
 def visible_claims_stmt(user: User):
     stmt = select(InsuranceClaim).join(Accident, InsuranceClaim.accident_id == Accident.id)
     if user.role == "FAMILY":  # family never sees insurance data
@@ -26,6 +47,7 @@ def visible_claims_stmt(user: User):
 
 
 def get_visible_claim(db: Session, user: User, claim_id: str) -> InsuranceClaim:
+    check_and_expire_claims(db)
     claim = db.scalar(visible_claims_stmt(user).where(InsuranceClaim.claim_id == claim_id))
     if not claim:
         raise HTTPException(404, "Claim not found")
@@ -56,6 +78,14 @@ def submit_claim(db: Session, user: User, p: ClaimCreate) -> InsuranceClaim:
         raise HTTPException(409, "A claim cannot be raised for a cancelled or false-alarm event")
     if acc.claim:
         raise HTTPException(409, "A claim already exists for this accident")
+    
+    # 7-day (1 week) claim window validation
+    now = datetime.now(timezone.utc)
+    if acc.accident_date:
+        acc_dt = acc.accident_date if acc.accident_date.tzinfo else acc.accident_date.replace(tzinfo=timezone.utc)
+        if (now - acc_dt) > timedelta(days=7):
+            raise HTTPException(400, "Claim rejected: Filing period expired. Claims must be submitted within 7 days (1 week) of the accident.")
+
     v = acc.vehicle
     claim = InsuranceClaim(
         claim_id=generate_claim_id(), accident_id=acc.id, policy_number=v.insurance_policy_number,

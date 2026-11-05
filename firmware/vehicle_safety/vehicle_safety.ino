@@ -3,6 +3,9 @@
 #include <Adafruit_SSD1306.h>
 #include <TinyGPSPlus.h>
 #include <math.h>
+#include <Preferences.h>
+
+Preferences prefs;
 
 // ---------- PIN CONFIGURATION ----------
 
@@ -32,7 +35,7 @@
 const char PHONE_NUMBER[] = "+918310678885";
 
 // Impact threshold (g). 1.30 triggers on strong bump, raise to ~2.5 for real crashes.
-const float IMPACT_THRESHOLD_G = 1.30;
+const float IMPACT_THRESHOLD_G = 2.0;
 
 // Time window driver can press button to cancel false alarm
 const unsigned long CANCEL_WINDOW_MS = 10000;
@@ -48,12 +51,14 @@ const unsigned long CANCEL_WINDOW_MS = 10000;
 const char MODEM_APN[]   = "airtelgprs.com";
 
 // Cloudflare Tunnel URL (update this each time you restart cloudflared)
-const char CLOUD_HOST[]  = "potato-arising-payments-projects.trycloudflare.com";
+const char CLOUD_HOST[]  = "evaluating-parade-headquarters-jerusalem.trycloudflare.com";
 const char CLOUD_PATH[]  = "/api/v1/device/accidents";
 
 // Device credentials from your admin dashboard
-const char DEVICE_ID[]   = "ESP01";
-const char DEVICE_KEY[]  = "rEnXY4iquz0ss5Be6G3tgytk59NXHpbn-oScPDG8rfo";
+const char DEVICE_ID[]     = "ESP01";
+const char DEVICE_KEY[]    = "rEnXY4iquz0ss5Be6G3tgytk59NXHpbn-oScPDG8rfo";
+const char OWNER_NAME[]    = "Rahul";
+const char VEHICLE_MODEL[] = "Innova";
 // ============================================================
 
 // ---------- OBJECTS ----------
@@ -145,6 +150,90 @@ String modemCommand(const String &command, unsigned long timeout = 2000) {
 
 // ---------- SEND SMS ----------
 
+bool sendSingleSMS(const char *targetNum, const String &message) {
+  Serial.print("\n[SMS] Trying destination: ");
+  Serial.println(targetNum);
+
+  // 1. Flush UART buffer
+  while (Modem_Serial.available()) Modem_Serial.read();
+
+  // 2. Ensure Text Mode & GSM Charset & LTE Packet Domain
+  modemCommand("AT+CMGF=1", 1000);
+  modemCommand("AT+CSCS=\"GSM\"", 1000);
+  modemCommand("AT+CSMP=17,167,0,0", 1000);
+  modemCommand("AT+CGSMS=1", 1000);          // Required for Jio LTE
+  modemCommand("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000); // Set SIM SMS memory
+
+  // Check SMS service center
+  String sca = modemCommand("AT+CSCA?", 1000);
+  Serial.println("[SMS] Current SMSC: " + sca);
+  if (sca.indexOf("+") < 0) {
+    // If SMSC is missing, set standard Jio SMSC
+    modemCommand("AT+CSCA=\"+917010075009\",145", 1000);
+  }
+
+  // 3. Send AT+CMGS with Carriage Return ONLY (\r)
+  while (Modem_Serial.available()) Modem_Serial.read();
+  Modem_Serial.print("AT+CMGS=\"");
+  Modem_Serial.print(targetNum);
+  Modem_Serial.print("\"\r");
+  Modem_Serial.flush();
+
+  // 4. Wait for '>' prompt
+  String prompt = "";
+  unsigned long started = millis();
+  while (millis() - started < 7000) {
+    while (Modem_Serial.available()) {
+      char c = (char)Modem_Serial.read();
+      prompt += c;
+      Serial.write(c);
+      if (c == '>') break;
+    }
+    if (prompt.indexOf('>') >= 0) break;
+    delay(10);
+  }
+
+  if (prompt.indexOf('>') < 0) {
+    Serial.println("\n[SMS] ERROR: No '>' prompt from modem. Response: " + prompt);
+    return false;
+  }
+
+  Serial.println("\n[SMS] Got '>' prompt. Writing message...");
+  delay(150);
+
+  // 5. Send message text
+  Modem_Serial.print(message);
+  Modem_Serial.flush();
+  delay(300);
+
+  // 6. Send Ctrl+Z (ASCII 26) to commit
+  Modem_Serial.write((uint8_t)26);
+  Modem_Serial.flush();
+
+  // 7. Wait up to 35s for network delivery confirmation (+CMGS:)
+  String response = "";
+  started = millis();
+  while (millis() - started < 35000) {
+    while (Modem_Serial.available()) {
+      char c = (char)Modem_Serial.read();
+      response += c;
+      Serial.write(c);
+    }
+    if (response.indexOf("+CMGS:") >= 0) {
+      Serial.println("\n[SMS] SUCCESS! Delivered to mobile network.");
+      return true;
+    }
+    if (response.indexOf("ERROR") >= 0 || response.indexOf("+CMS ERROR") >= 0) {
+      Serial.println("\n[SMS] FAILED with error: " + response);
+      return false;
+    }
+    delay(20);
+  }
+
+  Serial.println("\n[SMS] TIMEOUT: No response from network.");
+  return false;
+}
+
 bool sendSMS(const String &message) {
   if (String(PHONE_NUMBER).indexOf('X') >= 0) {
     Serial.println("Set PHONE_NUMBER before sending SMS.");
@@ -152,57 +241,35 @@ bool sendSMS(const String &message) {
     return false;
   }
 
-  String r = modemCommand("AT", 1500);
-  if (r.indexOf("OK") < 0) { Serial.println("Modem no response to AT."); return false; }
-
-  r = modemCommand("AT+CMGF=1", 1500);
-  if (r.indexOf("OK") < 0) { Serial.println("Could not set SMS text mode."); return false; }
-
-  while (Modem_Serial.available()) Modem_Serial.read();
-  Modem_Serial.print("AT+CMGS=\"");
-  Modem_Serial.print(PHONE_NUMBER);
-  Modem_Serial.print("\"\r\n");
-
-  String prompt;
-  unsigned long started = millis();
-  while (millis() - started < 10000) {
-    while (Modem_Serial.available()) { char c = Modem_Serial.read(); prompt += c; if (c == '>') break; }
-    if (prompt.indexOf('>') >= 0) break;
-    delay(10);
+  // First try with formatted number (e.g. +918310678885)
+  if (sendSingleSMS(PHONE_NUMBER, message)) {
+    return true;
   }
 
-  if (prompt.indexOf('>') < 0) { Serial.println("No SMS prompt."); return false; }
-
-  Modem_Serial.print(message);
-  Modem_Serial.write((uint8_t)26); // Ctrl+Z
-
-  String response;
-  started = millis();
-  while (millis() - started < 60000) {
-    while (Modem_Serial.available()) response += (char)Modem_Serial.read();
-    if (response.indexOf("+CMGS:") >= 0)     { Serial.println("SMS sent OK."); return true; }
-    if (response.indexOf("ERROR") >= 0)      { Serial.println("SMS failed: " + response); return false; }
-    delay(10);
+  // If first attempt failed and number starts with '+91', retry with 10 digits directly
+  String rawNum = String(PHONE_NUMBER);
+  if (rawNum.startsWith("+91")) {
+    String tenDigits = rawNum.substring(3);
+    Serial.println("\n[SMS] Retrying with 10-digit format: " + tenDigits);
+    if (sendSingleSMS(tenDigits.c_str(), message)) {
+      return true;
+    }
   }
-  Serial.println("SMS timeout.");
+
   return false;
 }
 
-// ---------- GPS MESSAGE ----------
+// ---------- GPS MESSAGE (Kept strictly under 140 chars for single-part GSM SMS) ----------
 
 String makeAccidentMessage() {
-  String msg = "VEHICLE ACCIDENT ALERT!";
+  String msg = "CRASHSENSE ALERT!\nVehicle: Innova (KA13AB1234)\nOwner: Rahul";
   if (gps.location.isValid() && gps.location.age() < 10000) {
     double lat = gps.location.lat();
     double lon = gps.location.lng();
-    msg += "\nLatitude: " + String(lat, 6);
-    msg += "\nLongitude: " + String(lon, 6);
-    msg += "\nMap: https://maps.google.com/?q=" + String(lat, 6) + "," + String(lon, 6);
+    msg += "\nMap: https://maps.google.com/?q=" + String(lat, 5) + "," + String(lon, 5);
   } else {
-    msg += "\nGPS location not available.";
-    msg += "\nPlease check the vehicle.";
+    msg += "\nLocation: GPS searching satellites";
   }
-  msg += "\nPlease verify immediately.";
   return msg;
 }
 
@@ -214,19 +281,23 @@ bool sendToCloud(float lat, float lon, float gForce) {
 
   // Build accident ID: ACC-ESP01-NNNNN
   char accId[30];
-  sprintf(accId, "ACC-ESP01-%05d", accidentCounter++);
+  int currentId = accidentCounter++;
+  prefs.putInt("counter", accidentCounter);
+  sprintf(accId, "ACC-ESP01-%05d", currentId);
 
-  // Build JSON body
-  char jsonBody[256];
+  // Build JSON body with vehicle model & owner description
+  char jsonBody[280];
   if (lat != 0.0 && lon != 0.0) {
     sprintf(jsonBody,
       "{\"accident_id\":\"%s\",\"latitude\":%.6f,\"longitude\":%.6f,"
-      "\"gps_valid\":true,\"acceleration_g\":%.2f,\"accident_status\":\"DETECTED\"}",
+      "\"gps_valid\":true,\"acceleration_g\":%.2f,\"accident_status\":\"DETECTED\","
+      "\"description\":\"Innova - Owner: Rahul\"}",
       accId, lat, lon, gForce);
   } else {
     sprintf(jsonBody,
       "{\"accident_id\":\"%s\",\"latitude\":null,\"longitude\":null,"
-      "\"gps_valid\":false,\"acceleration_g\":%.2f,\"accident_status\":\"DETECTED\"}",
+      "\"gps_valid\":false,\"acceleration_g\":%.2f,\"accident_status\":\"DETECTED\","
+      "\"description\":\"Innova - Owner: Rahul\"}",
       accId, gForce);
   }
 
@@ -368,6 +439,13 @@ void setup() {
 
   Serial.println("\nVehicle Safety System Starting");
 
+  // Load persistent accident counter
+  prefs.begin("crashsense", false);
+  accidentCounter = prefs.getInt("counter", 1);
+  if (accidentCounter < 1) accidentCounter = 1;
+  Serial.print("Next Accident Counter: ");
+  Serial.println(accidentCounter);
+
   // MPU I2C
   Wire.begin(MPU_SDA, MPU_SCL);
   Wire.setClock(100000);
@@ -399,8 +477,13 @@ void setup() {
 
   if (modemReady) {
     modemCommand("ATE0",    1000);
-    modemCommand("AT+CMEE=2", 1000);
-    Serial.println("Modem OK.");
+    modemCommand("AT+CMEE=2", 1000); // Verbose error codes (+CMS ERROR)
+    modemCommand("AT+CMGF=1", 1000); // SMS Text Mode
+    modemCommand("AT+CSCS=\"GSM\"", 1000); // GSM character set
+    modemCommand("AT+CGSMS=1", 1000); // Route SMS over Packet Domain (LTE) for Jio & 4G
+    modemCommand("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000); // Preferred SMS storage on SIM
+    modemCommand("AT+CSMP=17,167,0,0", 1000);
+    Serial.println("Modem OK (SMS initialized for 4G/Jio).");
   } else {
     Serial.println("Modem not responding. Check UART/power.");
   }

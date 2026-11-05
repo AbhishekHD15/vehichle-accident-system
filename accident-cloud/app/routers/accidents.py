@@ -41,7 +41,7 @@ def list_accidents(
             stmt = stmt.where(Accident.id.in_(select(InsuranceClaim.accident_id).where(InsuranceClaim.claim_status == claim_status)))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.options(joinedload(Accident.vehicle), joinedload(Accident.owner), joinedload(Accident.claim))
-                      .order_by(Accident.accident_date.desc()).offset((page - 1) * page_size).limit(page_size)).unique().all()
+                      .order_by(Accident.created_at.desc(), Accident.id.desc()).offset((page - 1) * page_size).limit(page_size)).unique().all()
     return {"items": [accident_service.serialize(a, user) for a in rows], "total": total, "page": page, "page_size": page_size}
 
 

@@ -19,6 +19,7 @@ def create_claim(p: ClaimCreate, user: User = Depends(require_roles("OWNER", "AD
 @router.get("")
 def list_claims(status: str | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
                 user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    svc.check_and_expire_claims(db)
     stmt = svc.visible_claims_stmt(user)
     if status:
         stmt = stmt.where(InsuranceClaim.claim_status == status)

@@ -1,6 +1,6 @@
-# IoT Vehicle Accident Detection & Insurance Management System
+# CrashSense — IoT Vehicle Accident Detection & Insurance Management System
 
-ESP32 + MPU6050/6500 + u-blox GPS + A7672S 4G modem → FastAPI + PostgreSQL → React dashboards
+ESP32 + MPU6050/6500 + u-blox GPS + A7672S 4G modem → FastAPI + PostgreSQL → CrashSense React dashboards
 (Owner · Family · Insurance · Admin).
 
 ```

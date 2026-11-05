@@ -36,7 +36,7 @@ def _by_month(db, user):
 def owner(user: User = Depends(require_roles("OWNER")), db: Session = Depends(get_db)):
     vehicles = db.scalars(acs.scope_vehicles(select(Vehicle), user)).all()
     acc_stmt = acs.scope_accidents(select(Accident), user)
-    latest = db.scalar(acc_stmt.order_by(Accident.accident_date.desc()))
+    latest = db.scalar(acc_stmt.order_by(Accident.created_at.desc()))
     notif = db.execute(acs.scope_accidents(select(Notification.delivery_status, func.count())
                                            .join(Accident, Notification.accident_id == Accident.id), user)
                        .group_by(Notification.delivery_status)).all()
@@ -50,7 +50,7 @@ def owner(user: User = Depends(require_roles("OWNER")), db: Session = Depends(ge
 @router.get("/family")
 def family(user: User = Depends(require_roles("FAMILY")), db: Session = Depends(get_db)):
     vehicles = db.scalars(acs.scope_vehicles(select(Vehicle), user)).all()
-    latest = db.scalar(acs.scope_accidents(select(Accident), user).order_by(Accident.accident_date.desc()))
+    latest = db.scalar(acs.scope_accidents(select(Accident), user).order_by(Accident.created_at.desc()))
     return {
         "vehicles": [{"id": v.id, "vehicle_number": v.vehicle_number, "vehicle_model": v.vehicle_model,
                       "vehicle_type": v.vehicle_type, "owner_name": v.owner.full_name, "owner_phone": v.owner.phone}
@@ -80,8 +80,8 @@ def insurance(user: User = Depends(require_roles("INSURANCE")), db: Session = De
 @router.get("/admin")
 def admin(user: User = Depends(require_roles("ADMIN")), db: Session = Depends(get_db)):
     devices = db.scalars(select(Device).order_by(Device.id)).all()
-    latest = db.scalar(select(Accident).order_by(Accident.accident_date.desc()))
-    recent_accidents = db.scalars(select(Accident).order_by(Accident.accident_date.desc()).limit(5)).all()
+    latest = db.scalar(select(Accident).order_by(Accident.created_at.desc()))
+    recent_accidents = db.scalars(select(Accident).order_by(Accident.created_at.desc()).limit(5)).all()
     return {
         "total_users": _count(db, select(User)), "total_vehicles": _count(db, select(Vehicle)),
         "total_devices": len(devices), "total_accidents": _count(db, select(Accident)),
